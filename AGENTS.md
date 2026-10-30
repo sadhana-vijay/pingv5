@@ -1,0 +1,669 @@
+# AGENTS.md: Ping - Dungeons and Dragons
+
+> **Purpose of this file.** This is the single source of truth for the Dungeons and Dragons project. It serves two audiences:
+>
+> 1. **The organising team (humans)**: a full description of the event, its mechanics, and what is still undecided.
+> 2. **AI coding agents** (Claude Code, Codex, Cursor, etc.) working in this repository: operating rules, boundaries, and conventions.
+>
+> If anything in the codebase contradicts this file, raise it rather than silently picking one. If something is listed under **Open Questions**, do **not** invent an answer; flag it, or implement it behind a clearly marked placeholder.
+
+**Status legend used throughout:**
+
+- [DECIDED] **Decided**: confirmed by the organisers.
+- [OPEN] **Open**: undecided. Do not assume.
+- [PROPOSED] **Proposed**: a suggestion for discussion, not a commitment.
+
+- **Implementation note**: a detail can be architecturally important without being decided. Keep such details configurable and do not turn examples into rules.
+
+**Authority order:** explicit organiser decisions in this file → confirmed repository interfaces/tests → clearly labelled proposals → assumptions. If two sources conflict, stop and report the conflict.
+
+---
+
+## Table of Contents
+
+1. [Project Summary](#1-project-summary)
+2. [Core Design Philosophy](#2-core-design-philosophy)
+3. [System Architecture](#3-system-architecture)
+4. [The Game Engine: Directed Graph and Nodes](#4-the-game-engine-directed-graph-and-nodes)
+5. [Information Boundaries](#5-information-boundaries-who-sees-what)
+6. [Dynamic (Intermediate) Nodes](#6-dynamic-intermediate-nodes)
+7. [Turn Structure and Synchronisation Barrier](#7-turn-structure-and-synchronisation-barrier)
+8. [Classes, Stats, Objectives and Ranking](#8-classes-stats-objectives-and-ranking)
+9. [Dice and Action Resolution](#9-dice-and-action-resolution)
+10. [Player Interaction and Coordination](#10-player-interaction-and-coordination)
+11. [Action Format and Grammar-Constrained Generation](#11-action-format-and-grammar-constrained-generation)
+12. [The Participant Harness](#12-the-participant-harness)
+13. [Model, Context Window and Hardware Constraints](#13-model-context-window-and-hardware-constraints)
+14. [Security Model](#14-security-model)
+15. [Tournament Structure](#15-tournament-structure)
+16. [End-to-End Event Flow](#16-end-to-end-event-flow)
+17. [Build-Phase Deliverables for Participants](#17-build-phase-deliverables-for-participants)
+18. [Organiser Task List](#18-organiser-task-list)
+19. [Open Questions](#19-open-questions)
+20. [Instructions for AI Coding Agents](#20-instructions-for-ai-coding-agents)
+21. [Change Management and Specification Hygiene](#21-change-management-and-specification-hygiene)
+22. [Glossary](#22-glossary)
+
+---
+
+## 1. Project Summary
+
+**Ping - Dungeons and Dragons** is a mini hackathon event run by the **AIML team**.
+
+Participants build an **AI harness** (a Python class plus all the logic around a language model) that plays a **Dungeons & Dragons-style game** against other participants' harnesses. The harness must use a **1-billion-parameter language model**. The harness, not the model, is what is being judged.
+
+Participants **never see the real story**. During the build phase they get only:
+
+- The Game Master (GM) to practise against.
+- Descriptions of all possible classes (attributes, abilities, objectives).
+- A rough idea of the story and general constraints.
+- A test suite.
+- A small test story for individual testing.
+
+After submission, participants are grouped into independent runs (approximately 5 per run is a proposal, with the aim of one player per class). **The participant model and harness execute on the host laptop during the real game.**
+
+**Winning condition (summary):** survive; among survivors, complete your class objective; then further tie-breakers ([OPEN] undecided).
+
+---
+
+## 2. Core Design Philosophy
+
+[DECIDED] The Ping tests **harness engineering**, not raw LLM capability.
+
+The 1B model, the fixed context window, the lack of internet, the lack of persistent storage, the CPU and RAM caps, and the hidden game information are all deliberate constraints. They force participants to engineer around the model's weaknesses.
+
+Participants must independently decide:
+
+- What to remember, what to discard, what to summarise.
+- How to retrieve relevant information when needed.
+- How to spend a fixed context budget.
+- How to fit memory inside a fixed CPU and RAM budget, with no disk to fall back on.
+- How to reason about the current situation.
+- How to adapt to a class they do not know in advance.
+- How to pursue their objective while staying alive.
+
+**The core challenge:** _Build the smartest possible game-playing agent around a deliberately constrained model, without knowing the actual story or your assigned character beforehand._
+
+[DECIDED] **Non-LLM logic is explicitly allowed** (regex parsers, rule-based triage, structured memory, retrieval, embeddings computed at runtime within the resource cap, heuristics). Participants cannot offload all thinking to the LLM, and the 1B model should be used for narrow, well-scoped reasoning. This is the intended skill being tested.
+
+---
+
+## 3. System Architecture
+
+Three primary components:
+
+### A. Game Engine
+
+- [DECIDED] A **directed graph**. Nodes are game states; directed edges are possible transitions.
+- Multiple branching paths and multiple endings.
+- [DECIDED] Holds the authoritative game state and player stats.
+
+### B. Game Master (GM)
+
+- A model hosted on organisers' machines. **Not constrained** to 1B.
+- [DECIDED] Has the **complete skeletal graph**: all nodes, edges, transition conditions, and node information.
+- Keeps the narrative on the intended story rails, preventing hallucinated storylines and tangents.
+- Interprets players' actions (including creative ones) and decides which next state fits.
+- [DECIDED] The test GM is exactly the same model/configuration as the real GM.
+
+### C. Participant AI Harness
+
+- A **Python class** wrapping a 1B model and any surrounding logic.
+- Responsible for: processing observations, maintaining memory, managing context, summarising and prioritising, tracking player and game info, choosing actions, and emitting the structured action.
+
+---
+
+## 4. The Game Engine: Directed Graph and Nodes
+
+Each node stores the information for one game state. Conceptually it holds **three organiser-maintained sets** plus the **current event** and **player stats**.
+
+### Set 1: Previous Game Information _(organiser/GM only)_
+
+1. **Previous game state**: the previous node.
+2. **Summary of previous narrative**: what happened before.
+3. **Previous character actions**: what each character did last turn.
+
+### Set 2: Possible Next Game States _(organiser/GM only)_
+
+1. **Possible next game states**: the outgoing edges from this node.
+2. **Required conditions**: what must be fulfilled to take each transition, where applicable.
+
+The GM uses this to choose the appropriate transition from participants' actions and the situation.
+
+**Important modelling rule:** the three organiser-maintained sets above are data stored on each node; they are not three separate services or three separate graphs. The graph is the game engine's directed graph. Its nodes hold the per-state data, and its directed outgoing edges represent possible transitions. A dynamic node, when allowed, must use the same node-data structure.
+
+### Set 3: Defined Interactions _(organiser/GM only)_
+
+Predefined, obvious interactions available in the node. Example, a giant in a tavern:
+
+- Try to kill the giant.
+- Run away.
+- Hide.
+
+**Purpose:** reduce GM load by pre-handling the obvious cases so the GM does not reason from scratch every time.
+
+**Important:** participants are **not restricted** to these. A player might try to seduce the giant; the GM must still interpret and resolve it.
+
+### Other node data
+
+- **Current event**: what is happening now (e.g. _"A giant is in your tavern."_). **Shown to players.**
+- **Individual player stats**: HP, attributes, abilities, inventory, etc. The engine holds the authoritative copy and gives each player **only their own**.
+
+---
+
+## 5. Information Boundaries (Who Sees What)
+
+| Information                      | Organisers / GM | Participants                         |
+| -------------------------------- | --------------- | ------------------------------------ |
+| Previous game state              | Yes             | **No**                               |
+| Summary of previous narrative    | Yes             | **No**                               |
+| Previous character actions       | Yes             | **No**                               |
+| Possible next game states        | Yes             | **No**                               |
+| Required transition conditions   | Yes             | **No**                               |
+| Defined interactions in node     | Yes             | **No**                               |
+| Current event                    | Yes             | **Yes**                              |
+| Individual player stats          | Yes             | **Own only**                         |
+| Other players' classes and stats | Yes             | **Initial state only**               |
+| Own objective                    | Yes             | **Yes (initial state)**              |
+| Other players' objectives        | Yes             | **No (hidden)**                      |
+| Resolution outcome of the round  | Yes             | **Yes (announced after resolution)** |
+
+[DECIDED] **Initial-state observation:** current event, own stats and objective, and other players' classes and stats. Other players' objectives are never revealed.
+
+[DECIDED] **Subsequent per-turn observation:** current event + own stats. After actions are resolved and before the GM selects the next game state, active harnesses also receive the publicly announced outcome of the round, including the outcomes of other players' actions. The resolution payload does not include hidden information, private objectives, or organiser-only node data. Nothing else is automatically provided.
+
+The distinction is intentional: participants must build their own in-memory record of anything they want to keep. The engine does **not** replay history to them.
+
+> [OPEN] The exact contents and format of the resolution outcome are not yet decided.
+
+---
+
+## 6. Dynamic (Intermediate) Nodes
+
+**Problem:** a purely predefined graph risks feeling like a choose-your-own-adventure book instead of D&D.
+
+**Solution:** the GM may generate **intermediate dynamic nodes** between skeletal nodes.
+
+- The skeletal graph remains predefined and authoritative.
+- Dynamic nodes have **exactly the same structure** as normal nodes (same information categories).
+- They let the GM elaborate events and introduce situations dynamically.
+- [PROPOSED] **Maximum of 2 consecutive dynamic nodes** (proposed value). After at most two, the GM **must** select the next node from the skeletal graph.
+
+```
+Skeletal A → Dynamic 1 → Dynamic 2 → Skeletal B      [DECIDED] allowed
+Skeletal A → Dynamic 1 → Dynamic 2 → Dynamic 3 → …    not allowed
+```
+
+This balances narrative flexibility with story adherence. The barrier and turn structure apply identically to dynamic nodes.
+
+---
+
+## 7. Turn Structure and Synchronisation Barrier
+
+[DECIDED] A **synchronisation barrier** exists at **every round**, for both skeletal and dynamic nodes. It sits **before dice rolls**.
+
+**Per-round sequence:**
+
+1. At the start of the first round, each living participant receives the **initial-state observation**, containing the current event, their own stats and objective, and the other players' classes and stats. In subsequent rounds, living participants receive only the **current event** and **their own stats**.
+2. Each harness independently processes the observation and decides an action. This happens within the barrier's **set time limit**: the harness may do whatever internal processing it likes (non-LLM logic, one LLM call, several LLM calls) as long as it submits in time.
+3. Each harness submits its **structured JSON action**.
+4. **Barrier (action submission)**: the game waits for all submissions, up to the set time limit.
+5. **One dice roll per player's action** happens (see §9).
+6. Actions are **resolved**.
+7. The **resolution outcome is announced** to all active harnesses (see §5). Nothing is required of a living player's harness except to ingest it however it wishes and send back a confirmation of receipt. If a player dies during resolution, their death is announced as part of the resolution outcome and their harness does not participate in the confirmation barrier.
+8. **Barrier (confirmation)**: the game waits for confirmations from all surviving players, with a **shorter time limit** than the action-submission barrier.
+9. The **GM selects the next game state** using the graph.
+10. Next round begins.
+
+[DECIDED] **All players travel together.** There is one shared sequence of game states. Players cannot branch off into separate nodes.
+
+[DECIDED] When a character dies, its harness is **discarded** and is no longer called. The organisers' program records that the player died, along with the character info: time alive, whether the objective was completed, and any other significant information.
+
+[DECIDED] **Termination:** the graph's maximum-depth nodes are the different **ending nodes**. When the run reaches any ending node and the round there completes (harness actions submitted, actions resolved, resolution announced), the run for that group is over. The tie-breaking and point aggregation rules then apply (see §8).
+
+> [OPEN] The duration of the action-submission time limit, the duration of the shorter confirmation time limit, the total game time limit, and behaviour on timeout or an invalid action are **undecided**.
+
+---
+
+## 8. Classes, Stats, Objectives and Ranking
+
+### Classes
+
+- Participants receive **descriptions of all possible classes** during the build phase: characteristics, attributes, abilities, and objectives.
+- [DECIDED] Participants **do not know which class they will get**. Assignment happens at the start of the real game, **after submission**.
+- [DECIDED] **Stats are fixed per class.** (The earlier idea of letting participants propose/lock their own stats, including the unclear "Lua" mention, is **dropped**.)
+- [DECIDED] **One player per class per run.**
+- The harness **must adapt to any class** at runtime. It cannot be specialised after the fact.
+
+### Objectives
+
+- [DECIDED] Each class has an objective.
+- [DECIDED] A player is expected to receive the objective associated with their assigned class, but the exact observation field and timing should be confirmed in the interface specification.
+- [DECIDED] Other players' objectives are not part of the stated participant-facing information. Treat them as hidden unless the organisers explicitly decide otherwise.
+
+### Ranking
+
+Intended priority order:
+
+1. **Survive.** Primary objective.
+2. **Complete the assigned class objective.** Tie-breaker among survivors.
+3. **Further tie-breaking criteria**, if required. [OPEN] _Undecided_ (candidates: HP remaining, turns survived, objective progress, summed stats).
+
+[PROPOSED] The stored character records (§7) could feed a **points allocation**.
+
+> [OPEN] How scores are aggregated **across runs** (different groups, different dynamics, different difficulty by class) is **undecided**.
+
+---
+
+## 9. Dice and Action Resolution
+
+[DECIDED] Each player's action receives exactly one dice roll.
+
+[OPEN] The actual dice system and mechanics (e.g. d20 + modifier), how stats map to rolls, whether those rules are disclosed to participants, and how simultaneous conflicting actions between players are ordered or resolved must be finalised.
+
+**Worked example:** three players act in the same round. Two choose _attack_, one chooses _hide_. **Each player receives one roll for their action** to determine whether it is possible and how well it succeeds. Both attackers can succeed (or fail) independently.
+
+[DECIDED] Players can **affect each other**: attacks, and other hostile or cooperative effects, can target other players.
+
+---
+
+## 10. Player Interaction and Coordination
+
+[DECIDED] GM-mediated coordination between players is permitted. Interaction does **not** happen privately player-to-player; it goes **through the GM**, so that players' 1B models do not have to deal with prompt injection from other players directly.
+
+[DECIDED] **Constraint inherited from the rules:** since a harness only receives _current event + own stats_ each turn (plus the resolution outcome and initial-state info), any communication mechanism has to be delivered through what the harness receives. Players act **simultaneously** behind the barrier, so there is no back-and-forth within a single round.
+
+[DECIDED] **Consequence of hidden objectives:** messages between players cannot be assumed truthful.
+
+> [OPEN] The interface and timing of player interaction are undecided. Do not implement a mechanism. If code needs a hook, use a clearly marked placeholder (see §20).
+
+---
+
+## 11. Action Format and Grammar-Constrained Generation
+
+[DECIDED] Each turn, a player submits **only an action** to the GM, as **structured JSON**. They submit nothing else; all memory and reasoning stays inside the harness.
+
+[DECIDED] **Organisers define the grammar.** Participants' models use **grammar-constrained generation** so output is always syntactically valid JSON in the required structure. This avoids malformed JSON and stray natural-language text.
+
+[DECIDED] The action includes an **open-ended free-text field.** Actions must be open-ended (e.g. "seduce the giant"), so a rigid enumerated verb list is not enough.
+
+Illustration of the _kind_ of output (**not the final schema**):
+
+```json
+{
+  "action": "attack",
+  "target": "giant"
+}
+```
+
+> [OPEN] **OPEN: the full action schema is not decided.** The exact field names, which fields are enumerated vs free text, field length limits, and whether any additional fields exist (for example for coordination) are all undecided. **Do not hard-code a schema.** Isolate schema handling in one module so it can change (see §20).
+
+[DECIDED] **Syntactically valid ≠ valid in-game.** The game engine must still validate every submitted action.
+
+> [OPEN] Handling of invalid or timed-out actions (retry, default "do nothing", penalty) is undecided.
+
+---
+
+## 12. The Participant Harness
+
+[DECIDED] Participants submit a **Python class** implementing their harness. Organisers run it for the actual game.
+
+[DECIDED] Each player has one harness instance for the duration of their participation in a run. The instance persists across turns, and its in-memory state is retained between calls. A new instance is created for each player at the beginning of each run. When a player dies, their harness is discarded and is no longer invoked.
+
+> [OPEN] The exact Python class interface, including method names, signatures, and lifecycle hooks (init, initial-state hook, per-turn method, etc.), will be defined by the organisers.
+
+### What the harness is responsible for
+
+- Parsing the observation (current event, own stats, resolution outcome, initial-state info).
+- Memory: deciding what to store, compress, and discard, in RAM and within the cap.
+- Context management within the fixed window.
+- Summarisation and prioritisation.
+- Tracking own state, other players' info (from initial state), and the objective.
+- Choosing an action and emitting it in the required structured format.
+- Adapting to whichever class it is assigned.
+
+### What is allowed
+
+- [DECIDED] **Non-LLM logic**: rules, regex, heuristics, structured data stores, keyword retrieval, embeddings (computed at runtime within the cap), etc.
+- [DECIDED] Any **in-memory** memory strategy (summarisation, retrieval, structured memory, compression) that fits within the CPU/RAM cap.
+- [DECIDED] The 1B model for narrow reasoning steps.
+- [DECIDED] Each harness runs under an enforced maximum **CPU** and **memory (RAM)** cap. [OPEN] The cap values, whether the 1B model's footprint counts against the cap, and what happens on a breach (process killed, treated as a timed-out action, etc.). Keep both caps as configuration values.
+
+### What is not allowed
+
+- Internet access of any kind.
+- Calling external LLMs/APIs (OpenAI, Gemini, Claude, etc.).
+- Downloading models or resources during gameplay.
+- Using a model larger than the provided 1B model.
+- Attempting to access the hidden graph, organiser resources, or other players' data.
+- Modifying own stats or the authoritative game state.
+- Exceeding the CPU/RAM caps, or attempting to persist data outside the harness's own process memory.
+
+[DECIDED] Within the action-submission time limit, a harness may do any internal processing it wants, including one or multiple LLM calls per turn. During resolution, the harness only needs to confirm receipt (§7).
+
+[DECIDED] Harnesses have **no persistent storage to speak of**. All memory lives in the harness instance's process memory (RAM). It persists across turns within a run (as stated above) and is lost when the harness is discarded or the run ends. Memory strategies must not depend on reading or writing files, and disk may not be used to extend the memory budget. Each player's memory is isolated from other players and organiser resources.
+
+> [OPEN] Whether any small ephemeral scratch area (e.g. a size-capped tmp directory) exists. Until decided, assume none.
+
+> [OPEN] **Undecided:** token budget per turn, and the exact time limits (§7).
+
+### Context vs. memory (distinct concepts)
+
+|             | Context window                                           | External memory                                                                                 |
+| ----------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| What        | Max information the model processes in **one inference** | Anything the harness keeps **outside the model, in process RAM** (no persistent storage)        |
+| Who decides | **Organisers** (fixed, identical for everyone)           | **Participants**                                                                                |
+| Example     | A fixed N-token limit                                    | Keep a compact event log in RAM (bounded by the cap), retrieve a small relevant subset per turn |
+
+The context-window size is fixed by organisers and the same enforcement rules apply to every participant. The per-turn token budget, if any, is a separate limit across the harness's model calls during one turn.
+
+---
+
+## 13. Model, Context Window and Hardware Constraints
+
+- [DECIDED] Participants **must** use a **1B-parameter** language model.
+- [DECIDED] Organisers set a **fixed context window**, identical for all participants and **independent of hardware**. This prevents anyone gaining an edge from a laptop that can run a larger context.
+- [DECIDED] The context limit must be enforced by the supplied inference/runtime configuration, not merely documented in participant instructions. The same enforcement rules and token-counting convention must apply to every participant.
+- [OPEN] The exact token-counting convention (including system prompt, observation, memory, and generated tokens) must be specified.
+- [DECIDED] **Assumed participant hardware:** 8 GB RAM, integrated GPU, 6-core CPU. The 1B model must run within this envelope.
+- [DECIDED] The per-harness CPU/RAM cap (§12) is an **enforced limit** applied on top of the assumed hardware envelope, not just guidance.
+- [DECIDED] **Actual execution location:** the participant model and harness execute on the host laptop during the real game.
+- [DECIDED] Organisers provide a **common Docker environment** so participants don't each configure everything.
+- [DECIDED] The Docker image is distributed via **GitHub Container Registry (GHCR)**.
+
+> [OPEN] **Undecided:** the specific 1B model, its quantisation, and the context window size. Organisers must ensure the _same model configuration and context limit_ apply to everyone.
+
+---
+
+## 14. Security Model
+
+### 14.1 No external access
+
+The participant harness executes in its isolated Docker environment on the host laptop. The container must not be able to reach the public internet or external APIs during gameplay. The organisers still need a controlled way to deliver observations and collect actions. Keep that organiser-to-agent communication separate from public network access (for example, an organiser-controlled local IPC/runner design); the exact transport is an implementation decision. The container must not have access to the host filesystem, organiser-only files, secrets, or the real graph, and has no writable persistent storage.
+
+Harness execution environments must have **no internet access**, to prevent:
+
+- External LLM API calls and outsourcing reasoning to larger models.
+- Accessing external websites or services.
+- Downloading additional models during gameplay.
+
+### 14.2 Isolation and integrity
+
+- Prevent access to the hidden skeletal graph.
+- Prevent access to information participants shouldn't have (other players' objectives, hidden node data).
+- Prevent participants from directly editing stats or authoritative state.
+- **Validate every submitted action** in the engine.
+- Restrict external API access.
+- Isolate each participant's execution environment (sandboxing).
+- Ensure participant code cannot reach unauthorised organiser resources.
+- Enforce the CPU and RAM caps at the runtime level (container/cgroup limits), not by honour system.
+
+---
+
+## 15. Tournament Structure
+
+- [DECIDED] The real game is run as **multiple independent runs**.
+- [PROPOSED] **~5 players per run** (a suggestion, not final). The aim is roughly **one participant per class** per run.
+- [DECIDED] Each run starts a **fresh game**; after it ends, the next group plays.
+- [DECIDED] Classes are assigned **at the start of each run**, after harnesses are frozen, so participants cannot tune to a specific class.
+- [OPEN] Cross-run scoring and aggregation are undecided.
+
+---
+
+## 16. End-to-End Event Flow
+
+### Phase A: Build
+
+1. Organisers prepare the Docker container and publish it via GHCR.
+2. Participants pull the container.
+3. Participants receive class descriptions (attributes, abilities, objectives).
+4. Participants receive general game info and constraints, plus a rough story idea.
+5. Participants get access to the GM (same model as real GM).
+6. Participants get a small **individually playable test game** and a **test suite**.
+7. Participants build their harness around the 1B model.
+8. Participants design their memory and context strategies, in-memory only and within the CPU/RAM cap.
+9. Participants test against the test game.
+10. Participants submit their Python class.
+
+[DECIDED] **Not available in this phase:** the real skeletal graph, the real game plan, assigned class, class-specific real stats.
+
+### Phase B: Real Game
+
+1. Organisers collect and freeze submissions.
+2. Participants are grouped into runs.
+3. Classes are assigned.
+4. Each participant receives the initial-state observation (current event, own stats and objective, and other players' classes and stats).
+5. The game begins.
+6. In each subsequent round, each living participant receives the current event and their own stats, manages memory, and returns an action within the time limit.
+7. The action-submission barrier waits for all living players' actions.
+8. Each player's action receives one dice roll; actions are resolved.
+9. The resolution outcome is announced to all active harnesses. Players who die during resolution are announced as dead, their harnesses are discarded, and they do not participate in the confirmation barrier.
+10. The confirmation barrier waits for confirmations from surviving players (shorter time limit).
+11. The GM chooses the next state from the graph (up to 2 consecutive dynamic nodes).
+12. All surviving players continue together.
+13. The run ends when the round at an ending node completes.
+14. Ranking: survival first, then objective completion, then further tie-breakers.
+
+---
+
+## 17. Build-Phase Deliverables for Participants
+
+What organisers must hand out:
+
+- [ ] Docker image on GHCR (with model, runtime, and resource-limit setup).
+- [ ] Class descriptions (stats, abilities, objectives for all classes).
+- [ ] General game rules and constraints document.
+- [ ] Rough story outline (without spoiling the real graph).
+- [ ] Access to the GM.
+- [ ] Test story (mini game, individually playable).
+- [ ] Test suite.
+- [ ] Python class interface and submission instructions.
+- [ ] Action grammar / schema documentation. _(blocked on open question)_
+- [ ] Fixed context window and model configuration documentation.
+- [ ] Documentation of the CPU/RAM caps and the no-persistent-storage rule. _(cap values blocked on open question)_
+
+---
+
+## 18. Organiser Task List
+
+From the whiteboard, **"for tomorrow"**:
+
+- [ ] Basic scenarios.
+- [ ] Model finalisation.
+- [ ] Player + GM.
+- [ ] Docker container setup.
+- [ ] Python class schema.
+- [ ] Security measures.
+
+Additional implied work:
+
+- [ ] Build the directed graph engine and node data model.
+- [ ] Implement the GM prompt/pipeline with skeleton-graph access and dynamic-node generation (max 2 consecutive).
+- [ ] Implement the synchronisation barrier and the turn loop.
+- [ ] Implement dice and resolution.
+- [ ] Implement action validation.
+- [ ] Implement the grammar for constrained generation.
+- [ ] Implement sandboxing, network isolation, CPU/RAM cap enforcement and a read-only filesystem for harness execution.
+- [ ] Author the real story graph, including endings.
+- [ ] Define class roster, stats, abilities, and objectives.
+- [ ] Define scoring and tie-breakers.
+
+---
+
+## 19. Open Questions
+
+Anything here is **undecided**. Do not assume answers.
+
+### Highest priority (explicitly deferred by organisers)
+
+1. **How players interact / coordinate.** GM-mediated coordination is permitted; its interface and timing are open. (§10)
+2. **The action schema.** Field names, which are free text vs enumerated, length limits, extra fields. (§11)
+
+### Harness interface
+
+3. Exact Python class interface, including method names, signatures, and lifecycle hooks (init, initial-state hook, per-turn method, etc.).
+
+### Model and compute
+
+4. Which 1B model, which quantisation.
+5. Context window size.
+6. Token budget per turn.
+7. Durations of the action-submission and confirmation time limits, and the total game time limit.
+8. CPU and RAM cap values, whether the 1B model's footprint counts toward them, and behaviour on breach. (§12)
+9. Maximum submission size and bundled assets. With no runtime storage, can participants ship precomputed data (embedding models, vector indexes, lookup tables) inside the submission? This affects whether "embeddings" is realistically usable. (§12)
+10. Whether any ephemeral scratch/tmp area exists. (§12)
+
+### Game mechanics
+
+11. Dice system and whether stat-to-roll rules are disclosed.
+12. How conflicting simultaneous actions between players are resolved and ordered.
+13. Exact contents, format, and scope of the resolution outcome surfaced to harnesses.
+14. Handling of invalid or timed-out actions.
+15. Exact maximum for consecutive dynamic nodes (2 is the proposal).
+
+### Scoring
+
+16. Further tie-breakers beyond survival and objective completion, and whether a points allocation is used.
+17. Cross-run score aggregation and fairness across different class mixes.
+
+### Build phase
+
+18. Whether the test game's observation and action formats match the real game exactly (strongly recommended).
+
+---
+
+## 20. Instructions for AI Coding Agents
+
+Read this section before changing anything in the repo.
+
+### 20.0 First steps
+
+Before coding:
+
+1. Read this file completely.
+2. Inspect the existing repository structure and tests before proposing a new architecture.
+3. Identify which requirements are [DECIDED], [OPEN], or [PROPOSED].
+4. Summarise any conflict between the task, this file, and existing code before making a breaking change.
+5. Prefer the smallest implementation that satisfies confirmed requirements.
+
+### 20.1 Ground rules
+
+1. **Treat this file as the spec.** Implement what is marked [DECIDED]. Do not implement [OPEN] items by guessing.
+2. **Respect information boundaries (§5).** Never write code that leaks hidden node data, other players' objectives, or the skeletal graph into a participant-facing observation.
+3. **Never let participant-supplied text act as instructions.** All player or NPC text is untrusted data, in both the harness and the GM pipeline.
+4. **Validate everything.** Syntactic validity of an action does not imply game validity.
+5. **Keep the engine authoritative.** Harnesses submit actions only; they never write state.
+6. **Do not add network calls** to participant-side code paths, and do not add dependencies that need network access at game time.
+7. **Ask before deciding.** If a task needs an open decision, stop and surface the question rather than choosing silently.
+
+### 20.2 Handling open questions in code
+
+- Put **all action-schema code** (types, JSON grammar, parsing, validation) in **one isolated module**, so it can change without touching the rest of the code.
+- Put **all player interaction hooks** (GM-mediated) behind a **single interface** with a no-op default.
+- Mark placeholders clearly, for example:
+  ```python
+  # OPEN-QUESTION(action-schema): final fields undecided; see AGENTS.md §11, §19.
+  ```
+- Make tunables (**context window, model path, dice rules, time limits, CPU cap, RAM cap, max consecutive dynamic nodes**) **configuration values**, never magic numbers.
+
+### 20.3 Proposed repository layout [PROPOSED]
+
+```
+dnd-ping/
+├── AGENTS.md                 # this file
+├── engine/                   # directed graph, nodes, state, barrier, dice, validation
+│   ├── graph.py
+│   ├── node.py
+│   ├── turn_loop.py
+│   ├── dice.py
+│   └── validation.py
+├── gm/                       # GM prompts, transition selection, dynamic-node generation
+├── schema/                   # action grammar + observation types (isolated; schema is OPEN)
+├── harness_api/              # the Python base class / interface participants implement
+├── sandbox/                  # Docker, network isolation, resource limits
+├── story/
+│   ├── test_story/           # the public mini game for participants
+│   └── real_story/           # PRIVATE; never shipped to participants
+├── classes/                  # class definitions (stats, abilities, objectives)
+├── tests/                    # test suite shipped to participants + internal tests
+├── examples/                 # reference/baseline harness (in-memory only, no file I/O)
+└── docs/
+```
+
+> `story/real_story/` and any GM-side data must **never** be included in the participant Docker image.
+
+### 20.4 Testing expectations
+
+- Unit-test the engine: graph traversal, enforcement of the configured consecutive-dynamic-node limit, barrier behaviour (including that dead players do not participate in the confirmation barrier), death handling (dead harnesses are no longer called), ending-node termination.
+- Test information boundaries: assert participant observations contain **only** permitted fields.
+- Test action validation: malformed, out-of-range, and adversarial inputs.
+- Include **prompt-injection test cases** (e.g. NPC dialogue or player text attempting to override instructions or extract hidden objectives).
+- Test against a resource-constrained configuration: the configured CPU/RAM caps within the assumed hardware (8 GB RAM, 6 cores, no GPU assumption). Test breach behaviour once decided, and test that any attempt to write to the filesystem fails.
+- Ensure the test story exercises the **same observation/action path** as the real game.
+
+### 20.4.1 Security implementation principles
+
+- Treat participant submissions as untrusted code, not merely untrusted prompts.
+- Do not treat Docker alone as a complete security boundary. Use least privilege, non-root execution, dropped capabilities, resource limits, a read-only root filesystem and no writable volume mounts (no persistent storage is provided to harnesses), and a stronger sandbox/VM boundary if the threat model requires it.
+- Do not mount the Docker socket, host home directories, organiser secrets, the real story graph, or unrelated host paths into participant containers.
+- Build and preload images/model assets before gameplay; runtime network access must not be needed.
+- Keep authoritative stats, dice, transition checks, and game state on the organiser side.
+- Never rely on a prompt instruction to protect information that can simply be withheld from the participant observation.
+- Log enough to audit actions, validation failures, timeouts, and game transitions, without leaking hidden information to participants.
+
+### 20.5 Style conventions
+
+- Python 3, type hints on public interfaces, small pure functions where possible.
+- Keep the participant-facing interface **minimal and stable**. Changes to it affect every participant.
+- Prefer explicit configuration over hidden globals.
+- Document every public class and function with its place in the turn sequence (§7).
+
+### 20.6 Things an agent must not do
+
+- Do not add features that give the GM or engine's hidden information to harnesses.
+- Do not weaken sandboxing or the network restrictions to "make tests pass".
+- Do not hard-code the real story, class stats, or scoring before the organisers finalise them.
+- Do not assume a specific model, quantisation, or context size.
+- Do not invent a coordination mechanism or final action schema.
+- Do not write harness, example, or test-story code that depends on file I/O or persistent storage.
+- Do not hard-code CPU/RAM cap values.
+
+---
+
+## 21. Change Management and Specification Hygiene
+
+When organisers make or revise a decision:
+
+1. Update the relevant section in this file.
+2. Update the status marker ([DECIDED], [OPEN], or [PROPOSED]).
+3. Remove the resolved item from Open Questions.
+4. Update interfaces, configuration, tests, and participant-facing documentation together.
+5. Add or update tests for any changed information boundary, turn rule, or security requirement.
+
+Do not leave contradictory old rules elsewhere in the file. If a decision changes the architecture, update the relevant prose descriptions and end-to-end flow as well. Do not add ASCII architectural diagrams.
+
+---
+
+## 22. Glossary
+
+| Term                               | Meaning                                                                                                                                                                                      |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Harness**                        | The participant's Python class plus all logic around the 1B model: memory, context handling, decision logic.                                                                                 |
+| **GM (Game Master)**               | The unconstrained organiser-hosted model that interprets actions and picks transitions.                                                                                                      |
+| **Skeletal graph**                 | The predefined directed graph of the real story. Hidden from participants.                                                                                                                   |
+| **Node**                           | One game state. Holds event, stats, and organiser-only info.                                                                                                                                 |
+| **Dynamic / intermediate node**    | A GM-generated node between skeletal nodes; max 2 in a row (proposed).                                                                                                                       |
+| **Defined interactions**           | Predefined obvious interactions in a node; hidden; not a restriction on player actions.                                                                                                      |
+| **Observation**                    | What a harness receives per turn: current event + own stats, plus the resolution outcome after each round (and initial-state info at the start).                                             |
+| **Action**                         | The structured JSON a harness returns each turn. Schema is OPEN.                                                                                                                             |
+| **Synchronisation barrier**        | A point where the game waits for all harnesses: first for all actions, before dice rolls (set time limit); then for confirmations of receipt of the resolution outcome (shorter time limit). |
+| **Run / playthrough**              | One independent game with a group of players (~5, one per class).                                                                                                                            |
+| **Ending node**                    | A terminal node in the graph; once the run reaches any and the round there completes, the run ends.                                                                                          |
+| **Resource cap**                   | The enforced maximum CPU and RAM available to a harness. Values are OPEN. Harnesses have no persistent storage, so all memory is in-process RAM.                                             |
+| **GHCR**                           | GitHub Container Registry, used to distribute the Docker image.                                                                                                                              |
+| **Grammar-constrained generation** | Decoding restricted to a predefined grammar so output is always valid structured JSON.                                                                                                       |
+| **Prompt injection**               | Text that tries to override a model's instructions; must be treated as untrusted content.                                                                                                    |
+
+---
+
+_Maintained from the organisers' planning discussion, whiteboard notes, and subsequent clarifications. When a decision is made, update the relevant section and remove it from §19. Do not silently promote a proposal or assumption into a requirement._
