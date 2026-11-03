@@ -60,11 +60,11 @@ Participants **never see the real story**. During the build phase they get only:
 - A test suite.
 - A small test story for individual testing.
 
-After submission, the game is played as independent runs. [DECIDED] There are 5 classes and more than 5 participants; each run draws 5 participants at random to fill the 5 classes, one per class. **The participant model and harness execute on the host laptop during the real game.**
+After submission, the game is played as independent runs. [DECIDED] There are 5 classes and more than 5 participants; each run draws 5 participants at random to fill the 5 classes, one per class. [DECIDED] Each participant plays exactly one run. **The participant model and harness execute on the organisers' host, which runs on GCP, during the real game.**
 
-[DECIDED] **Story shape:** there is a set of 5 bosses. Each run encounters every boss once, in a random order. Each class has a personal vendetta against one particular boss, but is not told which; it must work it out from hints in the boss encounters (see §4, §8).
+[DECIDED] **Story shape:** there is a set of 5 bosses. Each run encounters every boss once, in a random order. Each class has a nemesis, one particular boss. At the start of the run each class is given a description of its nemesis and a specific action to perform when it meets it. The nemesis is not named, so the harness must recognise it from the boss encounters' descriptions (see §4, §8).
 
-**Winning condition (summary):** survive all the boss encounters (the main goal for every class); defeating bosses earns bonuses, with a bigger bonus for the class whose vendetta boss it is ([OPEN] how this relates to the class objective, see §8); then further tie-breakers ([OPEN] undecided).
+**Winning condition (summary):** [DECIDED] surviving to the end of the run is required. Among survivors, the first tie-breaker is completing your vendetta: performing your required action against your nemesis with a successful dice roll (your class objective), which also earns a stat buff. The second is your stat total (see §8).
 
 ---
 
@@ -82,7 +82,7 @@ Participants must independently decide:
 - How to fit memory inside a fixed CPU and RAM budget, with no disk to fall back on.
 - How to reason about the current situation.
 - How to adapt to a class they do not know in advance.
-- How to pursue their objective, and recognise their vendetta boss from hints, while staying alive.
+- How to pursue their objective (recognise their nemesis from its description and perform the required action) while staying alive.
 
 **The core challenge:** _Build the smartest possible game-playing agent around a deliberately constrained model, without knowing the actual story or your assigned character beforehand._
 
@@ -106,7 +106,7 @@ Three primary components:
 - [DECIDED] Has the **complete skeletal graph**: all nodes, edges, transition conditions, and node information.
 - Keeps the narrative on the intended story rails, preventing hallucinated storylines and tangents.
 - Interprets players' actions (including creative ones) and decides which next state fits.
-- [DECIDED] Connects each story node with the drawn boss, writes the current event (including the boss's name and vendetta hints), fills in the defined interactions for that boss, and decides the boss's action (§4).
+- [DECIDED] Connects each story node with the drawn boss, writes the current event (including the boss's name and description), fills in the defined interactions for that boss, decides the boss's action (§4), and judges whether a player's action is their required vendetta action (§8).
 - [DECIDED] The test GM is exactly the same model/configuration as the real GM.
 
 ### C. Participant AI Harness
@@ -154,7 +154,7 @@ Obvious interactions for the current situation. Example, a giant in a tavern:
 
 ### Current event
 
-What is happening now (e.g. _"A giant is in your tavern."_). The GM writes it by connecting the node's story with the boss drawn for that node. **Shown to players.** [DECIDED] It names the boss and contains keywords that hint at which class has a vendetta against it (§8).
+What is happening now (e.g. _"A giant is in your tavern."_). The GM writes it by connecting the node's story with the boss drawn for that node. **Shown to players.** [DECIDED] It names the boss and includes a description of it, which harnesses match against their nemesis description (§8).
 
 ### Bosses
 
@@ -163,34 +163,36 @@ What is happening now (e.g. _"A giant is in your tavern."_). The GM writes it by
 - [DECIDED] No node is tied to a particular boss. At runtime the GM connects the current story node with the boss drawn for it, adapting the narrative so the two fit.
 - [DECIDED] Each node is played for **one round**: every living player submits one action, and the story then moves to the next node, which brings a new boss (see §7).
 - [DECIDED] **Boss action.** The GM decides the boss's action based on the boss. If the players do not defeat the boss in its round, the GM announces the boss's action as part of the resolution. For example: the boss targets a player chosen on the basis of a stat, deals damage and applies an effect to them, while the other players escape unharmed. The story then moves to the next node.
-- [OPEN] Whether every node (including dynamic nodes, §6) carries a boss; if so, every run is exactly 5 rounds. Also open: where boss data (stats, HP, abilities) is held and whether any of it beyond the name is shown to participants; whether the boss acts in a round where it is defeated; and whether boss damage and target selection follow fixed rules applied by the engine or are left to the GM's judgement.
+- [OPEN] Whether every node (including dynamic nodes, §6) carries a boss; if so, every run is exactly 5 rounds. Also open: where boss data (stats, HP, abilities) is held and whether any of it beyond the name and description is shown to participants; whether the boss acts in a round where it is defeated; and whether boss damage and target selection follow fixed rules applied by the engine or are left to the GM's judgement.
 
 ---
 
 ## 5. Information Boundaries (Who Sees What)
 
-| Information                                 | Organisers / GM | Participants                              |
-| ------------------------------------------- | --------------- | ----------------------------------------- |
-| Previous game state                         | Yes             | **No**                                    |
-| Summary of previous narrative               | Yes             | **No**                                    |
-| Previous character actions                  | Yes             | **No**                                    |
-| Possible next game states                   | Yes             | **No**                                    |
-| Required transition conditions              | Yes             | **No**                                    |
-| Defined interactions (per boss)             | Yes             | **No**                                    |
-| Current event                               | Yes             | **Yes**                                   |
-| Current boss's name                         | Yes             | **Yes (in the current event)**            |
-| Which class's vendetta each boss is         | Yes             | **No (only hinted in the current event)** |
-| Individual player stats                     | Yes             | **Own only**                              |
-| Other players' classes and stats            | Yes             | **Initial state only**                    |
-| Own objective                               | Yes             | **Yes (initial state)**                   |
-| Other players' objectives                   | Yes             | **No (hidden)**                           |
-| Resolution outcome of the round             | Yes             | **Yes (announced after resolution)**      |
-| Broadcasts sent to `[all]` or to your class | Yes             | **Yes (after the broadcast barrier)**     |
-| Broadcasts sent to another class            | Yes             | **No**                                    |
+| Information                                              | Organisers / GM | Participants                                                                     |
+| -------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------- |
+| Previous game state                                      | Yes             | **No**                                                                           |
+| Summary of previous narrative                            | Yes             | **No**                                                                           |
+| Previous character actions                               | Yes             | **No**                                                                           |
+| Possible next game states                                | Yes             | **No**                                                                           |
+| Required transition conditions                           | Yes             | **No**                                                                           |
+| Defined interactions (per boss)                          | Yes             | **No**                                                                           |
+| Current event                                            | Yes             | **Yes**                                                                          |
+| Current boss's name                                      | Yes             | **Yes (in the current event)**                                                   |
+| Which class's nemesis each boss is                       | Yes             | **No, until a class completes its vendetta (the buff is announced to everyone)** |
+| Individual player stats                                  | Yes             | **Own only**                                                                     |
+| Other players' classes and stats                         | Yes             | **Initial state only**                                                           |
+| Own objective                                            | Yes             | **Yes (initial state)**                                                          |
+| Own nemesis description and required vendetta action     | Yes             | **Yes (initial state)**                                                          |
+| Other players' nemesis descriptions and required actions | Yes             | **No**                                                                           |
+| Other players' objectives                                | Yes             | **No (hidden)**                                                                  |
+| Resolution outcome of the round                          | Yes             | **Yes (announced after resolution)**                                             |
+| Broadcasts sent to `[all]` or to your class              | Yes             | **Yes (after the broadcast barrier)**                                            |
+| Broadcasts sent to another class                         | Yes             | **No**                                                                           |
 
-[DECIDED] **Initial-state observation:** current event, own stats and objective, and other players' classes and stats. Other players' objectives are never revealed.
+[DECIDED] **Initial-state observation:** current event, own stats and objective (including own nemesis description and required vendetta action), and other players' classes and stats. Other players' objectives, nemesis descriptions and required actions are never revealed.
 
-[DECIDED] **Subsequent per-turn observation:** current event + own stats. After actions are resolved and before the GM selects the next game state, active harnesses also receive the publicly announced outcome of the round, including the outcomes of other players' actions. The resolution payload does not include hidden information, private objectives, or organiser-only node data. Nothing else is automatically provided.
+[DECIDED] **Subsequent per-turn observation:** current event + own stats. After actions are resolved and before the GM selects the next game state, active harnesses also receive the publicly announced outcome of the round, including the outcomes of other players' actions. The resolution payload does not include hidden information, private objectives, or organiser-only node data. Nothing else is automatically provided. [DECIDED] The resolution outcome includes any vendetta stat buff awarded that round, announced to everyone (§8).
 
 The distinction is intentional: participants must build their own in-memory record of anything they want to keep. The engine does **not** replay history to them.
 
@@ -228,15 +230,15 @@ This balances narrative flexibility with story adherence. The barrier and turn s
 
 **Per-round sequence:**
 
-1. At the start of the first round, each living participant receives the **initial-state observation**, containing the current event, their own stats and objective, and the other players' classes and stats. In subsequent rounds, living participants receive only the **current event** and **their own stats**.
+1. At the start of the first round, each living participant receives the **initial-state observation**, containing the current event, their own stats and objective (including their nemesis description and required vendetta action), and the other players' classes and stats. In subsequent rounds, living participants receive only the **current event** and **their own stats**.
 2. **Broadcast window:** each harness may submit at most one optional broadcast message to the GM, addressed to `[None]`, `[all]`, or a specific `[class]`. `[None]` means no message; a submitted message cannot be empty. The broadcast window has a set time limit.
 3. **Barrier (broadcast submission):** the game waits for broadcast submissions up to the set time limit. A harness that does not submit within the window loses its opportunity to broadcast that round; it receives no extension or additional time.
 4. The GM announces each submitted message to its intended recipient or recipients, identifying the sender by class. `[all]` messages are announced to all harnesses; a class-addressed message is announced to the harness for that class. Harnesses receive the announcements before deciding their actions.
 5. Each harness processes the observation and any broadcasts it received, then decides an action. This happens within the action-submission barrier's **set time limit**: the harness may do whatever internal processing it likes (non-LLM logic, one LLM call, several LLM calls) as long as it submits in time.
 6. Each harness submits its **structured JSON action**.
-7. **Barrier (action submission):** the game waits for all submissions, up to the set time limit.
+7. **Barrier (action submission):** the game waits for all submissions, up to the set time limit. A player whose action is invalid or not submitted in time receives a health penalty (§11).
 8. Player-directed interactions are resolved first: each receives its dice roll, and successful positive effects are applied as buffs to the affected player's stats (see §9–10).
-9. Event-directed actions then receive their dice rolls and are resolved using the stats after those buffs have been applied (see §9).
+9. Event-directed actions then receive their dice rolls and are resolved using the stats after those buffs have been applied (see §9). If the GM judges that a player's action is their required vendetta action against their nemesis, that action's dice roll uses a lower success threshold; if it succeeds, the player receives a vendetta stat buff, announced to everyone in the resolution (§8).
 10. **Boss action:** if the boss was not defeated, the GM decides the boss's action based on the boss (§4), for example targeting a player based on a stat and dealing damage. The engine applies the effects to the game state.
 11. The GM narrates the collective resolution, including the boss's action, communicating the successes, failures, and effects through the story. The **resolution outcome is announced** to all active harnesses (see §5). Nothing is required of a living player's harness except to ingest it however it wishes and send back a confirmation of receipt. If a player dies during resolution, their death is announced as part of the resolution outcome and their harness does not participate in the confirmation barrier.
 12. **Barrier (confirmation):** the game waits for confirmations from all surviving players, with a **shorter time limit** than the action-submission barrier.
@@ -245,11 +247,11 @@ This balances narrative flexibility with story adherence. The barrier and turn s
 
 [DECIDED] **All players travel together.** There is one shared sequence of game states. Players cannot branch off into separate nodes.
 
-[DECIDED] When a character dies, its harness is **discarded** and is no longer called. The organisers' program records that the player died, along with the character info: time alive, whether the objective was completed, the boss-defeat and bonus information needed for scoring (§8), and any other significant information.
+[DECIDED] When a character dies, its harness is **discarded** and is no longer called. The organisers' program records that the player died, along with the character info: time alive, whether the objective was completed, whether they completed their vendetta, their stat total (§8), and any other significant information.
 
 [DECIDED] **Termination:** the graph's terminal nodes (nodes with no outgoing edges) are the different **ending nodes**. When the run reaches any ending node and the round there completes (harness actions submitted, actions resolved, resolution announced), the run for that group is over. The tie-breaking and point aggregation rules then apply (see §8).
 
-> [OPEN] The duration of the broadcast window, the action-submission time limit, the shorter confirmation time limit, and the total game time limit; whether a window closes early once every living harness has submitted; and behaviour on timeout or an invalid action are **undecided**.
+> [OPEN] The duration of the broadcast window, the action-submission time limit, the shorter confirmation time limit, and the total game time limit; whether a window closes early once every living harness has submitted; and behaviour on a missed confirmation are **undecided**. Invalid or timed-out actions receive a health penalty (§11).
 
 ---
 
@@ -257,7 +259,7 @@ This balances narrative flexibility with story adherence. The barrier and turn s
 
 ### Classes
 
-- Participants receive **descriptions of all possible classes** during the build phase: characteristics, attributes, abilities, objectives, and vendetta (without naming the boss; see Objectives below).
+- Participants receive **descriptions of all possible classes** during the build phase: characteristics, attributes, abilities, and objectives, including that each class has a vendetta. The nemesis description and required action are given only in the initial-state observation (see Objectives below).
 - [DECIDED] Participants **do not know which class they will get**. Assignment happens at the start of the real game, **after submission**.
 - [DECIDED] **Stats are fixed per class.** (The earlier idea of letting participants propose/lock their own stats, including the unclear "Lua" mention, is **dropped**.)
 - [DECIDED] There are exactly **5 classes**.
@@ -266,26 +268,27 @@ This balances narrative flexibility with story adherence. The barrier and turn s
 
 ### Objectives
 
-- [DECIDED] Each class has an objective.
+- [DECIDED] Each class has an objective: **successfully perform its required vendetta action when it encounters its nemesis** (below).
 - [DECIDED] The **main goal of every class is to survive** through all the boss encounters.
-- [DECIDED] Each class has a **personal vendetta** against one particular boss (§4). If that boss is defeated, the class gets a bigger bonus than the other classes do.
-- [DECIDED] **Classes are not told which boss is their vendetta boss.** Each boss encounter message names the boss and contains keywords that act as hints. Each harness's local model has to work out from those hints whether the current boss is its nemesis.
-- [OPEN] What the class descriptions say about each vendetta, for harnesses to match the hints against.
-- [OPEN] Whether the vendetta is the class objective referred to in this section and in Ranking item 2, or something separate. Also open: what counts as defeating a boss for the bonus (landing the final blow, taking part, or the boss being defeated by anyone), whether other classes also get a smaller bonus for that boss, and what the bonuses are worth.
+- [DECIDED] Each class has a **personal vendetta** against one particular boss, its **nemesis** (§4). In the initial-state observation, each class is given a **description of its nemesis** and a **specific action** to perform when it encounters it.
+- [DECIDED] **Each nemesis is unique.** Every class has a different nemesis, so the 5 classes and the 5 bosses pair one to one.
+- [DECIDED] **The nemesis is not named.** Each boss encounter message names the boss and describes it. The harness must match that description against its nemesis description to work out whether the current boss is its nemesis, and if so perform the required action.
+- [DECIDED] **Completing the vendetta.** The GM decides whether a player's action is the required action. The action still needs a successful dice roll, but against a **lower threshold** than normal. On success the player receives a **stat buff** (not points), which is announced to everyone. Completing the vendetta is the first tie-breaker in the ranking. Each boss appears once per run, so each class has one chance.
+- [OPEN] How much lower the vendetta threshold is; which stats the vendetta buff raises, by how much, and from when; and whether the boss must also be defeated.
 - [DECIDED] A player receives the objective of their assigned class in the initial-state observation (§5). [OPEN] The exact field is part of the undecided message format (§19).
 - [DECIDED] Other players' objectives are not part of the stated participant-facing information. Treat them as hidden unless the organisers explicitly decide otherwise.
 
 ### Ranking
 
-Intended priority order:
+[DECIDED] Players in a run are ranked in this order:
 
-1. **Survive** through all the boss encounters. Primary objective.
-2. **Complete the assigned class objective and earn boss bonuses.** Tie-breaker among survivors. [OPEN] How boss bonuses (including the bigger vendetta bonus) combine with objective completion; see Objectives above.
-3. **Further tie-breaking criteria**, if required. [OPEN] _Undecided_ (candidates: HP remaining, turns survived, objective progress, summed stats).
+1. **Survive to the end of the run.** Required: a player must be alive when the run ends.
+2. **First tie-breaker: completed vendetta.** Among survivors, players who completed their vendetta (see Objectives) rank above those who did not. [DECIDED] This counts as its own tie-breaker, in addition to the vendetta stat buff raising the player's stat total.
+3. **Second tie-breaker: stat total.** Remaining ties are broken by the player's stat total.
 
-[PROPOSED] The stored character records (§7) could feed a **points allocation**.
+[OPEN] Which stats make up the stat total (for example, whether HP counts, and whether it is the value at the end of the run), how players who died are ranked against each other, if at all, and what happens if players are still tied after the stat total.
 
-> [OPEN] How scores are aggregated **across runs** (different groups, different dynamics, different difficulty by class) is **undecided**.
+> [OPEN] Each participant plays one run (§15). How results are compared across runs, which have different groups, class assignments and boss orders, is **undecided**.
 
 ---
 
@@ -294,6 +297,8 @@ Intended priority order:
 [DECIDED] Each player's submitted action receives exactly one dice roll. A broadcast message does not receive a dice roll, and a player receiving an interaction does not submit a response or receive an additional roll.
 
 [DECIDED] Player-directed interactions are resolved before event-directed actions. Each player-directed interaction receives its action's one dice roll first; successful positive effects are applied as buffs to the affected player's stats. Event-directed actions then receive their dice rolls and are resolved using the stats after those buffs have been applied. If the boss is not defeated, the GM then decides the boss's action (§4). The GM narrates the collective resolution at the end, communicating successes, failures, and effects through the story.
+
+[DECIDED] A required vendetta action against the player's own nemesis is rolled against a **lower success threshold** than normal (§8).
 
 [OPEN] The actual dice system and mechanics (e.g. d20 + modifier), how stats map to rolls, and whether those rules are disclosed to participants must be finalised.
 
@@ -336,7 +341,9 @@ Illustration of the _kind_ of output (**not the final schema**):
 
 [DECIDED] **Syntactically valid ≠ valid in-game.** The game engine must still validate every submitted action.
 
-> [OPEN] Handling of invalid or timed-out actions (retry, default "do nothing", penalty) is undecided.
+[DECIDED] A player whose action is invalid, or not submitted within the action-submission time limit, receives a **health penalty**.
+
+> [OPEN] The size of the penalty, whether the player's action is otherwise treated as no action, whether the penalty can kill a player, and whether a retry is allowed.
 
 ---
 
@@ -355,7 +362,7 @@ Illustration of the _kind_ of output (**not the final schema**):
 - Context management within the fixed window.
 - Summarisation and prioritisation.
 - Tracking own state, other players' info (from initial state), and the objective.
-- Working out, from the hints in each boss encounter, whether the current boss is its vendetta boss.
+- Matching each boss encounter's description against its nemesis description, and performing the required vendetta action when it meets its nemesis.
 - Choosing an action and emitting it in the required structured format.
 - Adapting to whichever class it is assigned.
 
@@ -399,12 +406,12 @@ The context-window size is fixed by organisers and the same enforcement rules ap
 ## 13. Model, Context Window and Hardware Constraints
 
 - [DECIDED] Participants **must** use a **1B-parameter** language model.
-- [DECIDED] Organisers set a **fixed context window**, identical for all participants and **independent of hardware**. This prevents anyone gaining an edge from a laptop that can run a larger context.
+- [DECIDED] Organisers set a **fixed context window**, identical for all participants and **independent of hardware**. This prevents anyone gaining an edge from hardware that can run a larger context.
 - [DECIDED] The context limit must be enforced by the supplied inference/runtime configuration, not merely documented in participant instructions. The same enforcement rules and token-counting convention must apply to every participant.
 - [OPEN] The exact token-counting convention (including system prompt, observation, memory, and generated tokens) must be specified.
 - [DECIDED] **Assumed participant hardware:** 8 GB RAM, integrated GPU, 6-core CPU. The 1B model must run within this envelope.
 - [DECIDED] The per-harness CPU/RAM cap (§12) is an **enforced limit** applied on top of the assumed hardware envelope, not just guidance.
-- [DECIDED] **Actual execution location:** the participant model and harness execute on the host laptop during the real game.
+- [DECIDED] **Actual execution location:** during the real game, the participant model and harness execute on the organisers' host, which runs on **GCP**. The assumed hardware above describes participants' own machines during the build phase.
 - [DECIDED] Organisers provide a **common Docker environment** so participants don't each configure everything.
 - [DECIDED] The Docker image is distributed via **GitHub Container Registry (GHCR)**.
 
@@ -416,7 +423,7 @@ The context-window size is fixed by organisers and the same enforcement rules ap
 
 ### 14.1 No external access
 
-The participant harness executes in its isolated Docker environment on the host laptop. The container must not be able to reach the public internet or external APIs during gameplay. The organisers still need a controlled way to deliver observations and collect actions. Keep that organiser-to-agent communication separate from public network access (for example, an organiser-controlled local IPC/runner design); the exact transport is an implementation decision. The container must not have access to the host filesystem, organiser-only files, secrets, or the real graph, and has no writable persistent storage.
+The participant harness executes in its isolated Docker environment on the GCP host. The container must not be able to reach the public internet or external APIs during gameplay. The organisers still need a controlled way to deliver observations and collect actions. Keep that organiser-to-agent communication separate from public network access (for example, an organiser-controlled local IPC/runner design); the exact transport is an implementation decision. The container must not have access to the host filesystem, organiser-only files, secrets, or the real graph, and has no writable persistent storage.
 
 Harness execution environments must have **no internet access**, to prevent:
 
@@ -442,7 +449,8 @@ Harness execution environments must have **no internet access**, to prevent:
 - [DECIDED] The real game is run as **multiple independent runs**.
 - [DECIDED] **Exactly 5 players per run**, one per class. There are more than 5 participants in total; for each run, 5 are picked at random to fill the 5 classes.
 - [DECIDED] Each run draws its own random boss order (§4).
-- [OPEN] How many runs each participant plays, how the draw handles a participant count that is not a multiple of 5, and whether the draw guarantees that everyone plays.
+- [DECIDED] Each participant plays exactly **one run**.
+- [OPEN] What happens when the number of participants is not a multiple of 5, since each run needs exactly 5 players, one per class.
 - [DECIDED] Each run starts a **fresh game**; after it ends, the next group plays.
 - [DECIDED] Classes are assigned **at the start of each run**, after harnesses are frozen, so participants cannot tune to a specific class.
 - [OPEN] Cross-run scoring and aggregation are undecided.
@@ -469,22 +477,22 @@ Harness execution environments must have **no internet access**, to prevent:
 ### Phase B: Real Game
 
 1. Organisers collect and freeze submissions.
-2. For each run, 5 participants are drawn at random from the pool.
+2. For each run, 5 participants who have not yet played are drawn at random; each participant plays exactly one run.
 3. Each drawn participant is assigned one of the 5 classes, one per class.
-4. Each participant receives the initial-state observation (current event, own stats and objective, and other players' classes and stats).
+4. Each participant receives the initial-state observation (current event, own stats and objective including the nemesis description and required vendetta action, and other players' classes and stats).
 5. The game begins.
 6. In each round, each living participant receives the current event and their own stats.
 7. Each harness may submit at most one optional broadcast to the GM during the broadcast window, addressed to `[None]`, `[all]`, or a specific `[class]`.
 8. The broadcast-submission barrier waits for submissions. The GM announces messages to their intended recipients, identifying each sender by class. A harness that misses the window loses its opportunity to broadcast that round.
-9. After receiving broadcasts, each harness decides and submits an action within the action-submission time limit. The action is directed either at the current event or at a specific player/class, not both.
-10. Player-directed positive interactions receive their dice rolls first and successful effects are applied as buffs to affected players' stats. Event-directed actions then receive their dice rolls and are resolved using the modified stats.
+9. After receiving broadcasts, each harness decides and submits an action within the action-submission time limit. The action is directed either at the current event or at a specific player/class, not both. An invalid or late action receives a health penalty.
+10. Player-directed positive interactions receive their dice rolls first and successful effects are applied as buffs to affected players' stats. Event-directed actions then receive their dice rolls and are resolved using the modified stats. A required vendetta action against the player's nemesis uses a lower threshold; on success the player gets a stat buff, announced to everyone.
 11. If the boss was not defeated, the GM decides the boss's action and the engine applies its effects.
 12. The GM narrates the collective resolution, including the boss's action. The resolution outcome is announced to all active harnesses. Players who die during resolution are announced as dead, their harnesses are discarded, and they do not participate in the confirmation barrier.
 13. The confirmation barrier waits for confirmations from surviving players (shorter time limit).
 14. The GM chooses the next state from the graph (up to the configured limit of consecutive dynamic nodes; 2 is proposed) and connects it with the next randomly drawn boss (§4). Each node lasts exactly one round.
 15. All surviving players continue together.
 16. The run ends when the round at an ending node completes.
-17. Ranking: survival first, then objective completion and boss bonuses, then further tie-breakers.
+17. Ranking: surviving to the end is required; then completing your vendetta; then stat total.
 
 ---
 
@@ -493,7 +501,7 @@ Harness execution environments must have **no internet access**, to prevent:
 What organisers must hand out:
 
 - [ ] Docker image on GHCR (with model, runtime, and resource-limit setup).
-- [ ] Class descriptions (stats, abilities, objectives and vendetta for all 5 classes; the vendetta must not name the boss, §8).
+- [ ] Class descriptions (stats, abilities, objectives for all 5 classes, stating that each has a vendetta; nemesis descriptions and required actions are given only in the initial-state observation, §8).
 - [ ] Boss descriptions, if any boss information is disclosed. _(blocked on open question)_
 - [ ] General game rules and constraints document.
 - [ ] Rough story outline (without spoiling the real graph).
@@ -530,10 +538,10 @@ Additional implied work:
 - [ ] Implement sandboxing, network isolation, CPU/RAM cap enforcement and a read-only filesystem for harness execution.
 - [ ] Author the real story graph, including endings.
 - [ ] Define class roster, stats, abilities, and objectives.
-- [ ] Author the 5 bosses, each class's vendetta boss, and the keyword hints that link them.
+- [ ] Author the 5 bosses (with the descriptions used in boss encounters), each class's nemesis description, and each class's required vendetta action.
 - [ ] Implement the per-run game state (stats, history, boss draw), kept separate from the static story graph.
 - [ ] Implement the random boss draw per run and the GM steps that connect the drawn boss to a story node, fill in defined interactions, and decide the boss's action.
-- [ ] Define scoring and tie-breakers.
+- [ ] Define the stat-total calculation, the health penalty, the vendetta threshold and stat buff, and how results are compared across runs.
 
 ---
 
@@ -548,7 +556,7 @@ Anything here is **undecided**. Do not assume answers.
 3. Exact contents and format of every GM → participant message: initial-state observation, per-turn observation, broadcast delivery, and resolution outcome. (§5)
 4. The positive interactions available to each class (e.g. healing, lending mana, defending). (§10)
 5. Whether the GM forwards broadcast text word for word or rewrites it. Forwarding it word for word lets one player's prompt injection reach another player's 1B model, which routing through the GM is meant to prevent. (§10)
-6. Handling of invalid or timed-out actions. (§7, §11)
+6. Health penalty details: its size, whether the invalid or late action is otherwise treated as no action, whether the penalty can kill a player, whether a retry is allowed, and what happens on a missed confirmation. (§7, §11)
 
 ### Model and compute
 
@@ -559,7 +567,7 @@ Anything here is **undecided**. Do not assume answers.
 11. CPU and RAM cap values, whether the 1B model's footprint counts toward them, and behaviour on breach. (§12)
 12. Maximum submission size and bundled assets. With no runtime storage, can participants ship precomputed data (embedding models, vector indexes, lookup tables) inside the submission? This affects whether "embeddings" is realistically usable. (§12)
 13. Whether any ephemeral scratch/tmp area exists. (§12)
-14. Host capacity. All 5 harnesses, each with its own 1B model, run on one host laptop. Does the 8 GB RAM / 6-core envelope (§13) describe the host or participants' machines? Do the 5 harnesses run in parallel (sharing CPU within the same time limits) or one after another, and is that fair? (§13)
+14. The GCP host: the instance type; whether the 5 harnesses run in parallel or one after another, with equal CPU and RAM each; whether a GPU is present and usable; and how the per-harness caps relate to the 8 GB RAM / 6-core machines participants build on, so a harness behaves the same on the host as it did in testing. (§13)
 15. Who enforces the output grammar: the supplied runtime, or each participant's harness. (§11)
 
 ### Game mechanics
@@ -569,31 +577,29 @@ Anything here is **undecided**. Do not assume answers.
 18. Exact maximum for consecutive dynamic nodes (2 is the proposal). (§6)
 19. What happens if every player dies before an ending node is reached. (§7)
 20. Broadcast edge cases: addressing a dead player's class or your own class, and whether other players learn that a class-addressed message was sent. (§10)
+21. What causes death: HP reaching 0, or something else. (§7, §8)
 
 ### Bosses and story shape
 
-21. Whether every node, including dynamic nodes, carries a boss, and therefore whether every run is exactly 5 rounds. If so, each player makes only 5 actions per run, which reduces how much the memory and context-management challenge in §2 matters. (§4, §6)
-22. Where boss data (stats, HP, abilities) is held, and whether any of it beyond the boss's name is shown to participants, either in build-phase descriptions or in observations. (§4)
-23. Whether boss damage and target selection follow fixed rules applied by the engine or are left to the GM's judgement, and whether the boss acts in a round where it is defeated. Results left to the GM's judgement may differ between runs and cannot be reproduced if disputed. (§4)
-24. Whether each boss is the vendetta of exactly one class (a one-to-one mapping). (§8)
-25. What the class descriptions say about each vendetta, for harnesses to match the boss-encounter hints against. (§8)
+22. Whether every node, including dynamic nodes, carries a boss, and therefore whether every run is exactly 5 rounds. If so, each player makes only 5 actions per run, which reduces how much the memory and context-management challenge in §2 matters. (§4, §6)
+23. Where boss data (stats, HP, abilities) is held, and whether any of it beyond the boss's name and description is shown to participants, either in build-phase descriptions or in observations. (§4)
+24. Whether boss damage and target selection follow fixed rules applied by the engine or are left to the GM's judgement, and whether the boss acts in a round where it is defeated. Results left to the GM's judgement may differ between runs and cannot be reproduced if disputed. (§4)
+25. Confirm that nemesis descriptions and required actions are given only in each class's own initial-state observation, not also in the public build-phase class descriptions. If they were public, any player could work out other players' objectives, which §5 says are hidden. (§5, §8)
 
-### Scoring
+### Vendetta and ranking
 
-26. Whether the vendetta is the class objective, or separate from it. (§8)
-27. What counts as defeating a boss for the bonus (final blow, taking part, or defeated by anyone), the bonus values, and whether non-vendetta classes also get a bonus for that boss. (§8)
-28. Whether a points system is used (boss bonuses imply one, but §8 lists it only as a proposal), and further tie-breakers beyond survival, objective completion and boss bonuses. (§8)
-29. Cross-run score aggregation and fairness, given that groups, class assignments and boss order are all random. (§8, §15)
-30. **Conflict:** the build phase hands out all class descriptions, including objectives (§8), and the initial-state observation reveals other players' classes (§5). Any player can therefore work out the other players' objectives, which contradicts "other players' objectives are hidden". Vendetta bosses are not named, but the hints in each boss encounter go to every player, so other players may work those out too. (§5, §8)
+26. How much lower the vendetta dice threshold is; which stats the vendetta buff raises, by how much, and whether it applies from the same round or the next; and whether the boss must also be defeated for the vendetta to count. (§8, §9)
+27. Which stats make up the stat total, how players who died are ranked against each other (if at all), and what happens if players are still tied after the stat total. (§8)
+28. How results are compared across runs to pick overall winners, given that each participant plays one run and groups, class assignments and boss order are all random. (§8, §15)
 
 ### Tournament
 
-31. How many runs each participant plays, how the random draw handles a participant pool that is not a multiple of 5, and whether everyone is guaranteed to play. (§15)
+29. What happens when the number of participants is not a multiple of 5. (§15)
 
 ### Build phase
 
-32. Whether the test game's observation and action formats match the real game exactly (strongly recommended). (§16)
-33. How participants reach the GM during the build phase, given that harness containers have no network access during gameplay (§14). The network rules for the build/test setup need defining. (§14, §16)
+30. Whether the test game's observation and action formats match the real game exactly (strongly recommended). (§16)
+31. How participants reach the GM during the build phase, given that harness containers have no network access during gameplay (§14). The network rules for the build/test setup need defining. (§14, §16)
 
 ---
 
@@ -631,7 +637,7 @@ Before coding:
   # OPEN-QUESTION(action-schema): final fields undecided; see AGENTS.md §11, §19.
   ```
 
-- Make tunables (**context window, model path, dice rules, time limits, CPU cap, RAM cap, max consecutive dynamic nodes, boss set, random seeds for the participant and boss draws**) **configuration values**, never magic numbers.
+- Make tunables (**context window, model path, dice rules, time limits, CPU cap, RAM cap, max consecutive dynamic nodes, health penalty, vendetta dice threshold, vendetta stat buff, boss set, random seeds for the participant and boss draws**) **configuration values**, never magic numbers.
 
 ### 20.3 Proposed repository layout [PROPOSED]
 
@@ -652,7 +658,7 @@ dnd-ping/
 │   ├── test_story/           # the public mini game for participants
 │   └── real_story/           # PRIVATE; never shipped to participants
 ├── classes/                  # class definitions (stats, abilities, objectives, vendetta)
-├── bosses/                   # PRIVATE boss definitions, vendetta assignments and hint keywords
+├── bosses/                   # PRIVATE boss definitions and descriptions, nemesis descriptions, required vendetta actions
 ├── tests/                    # test suite shipped to participants + internal tests
 ├── examples/                 # reference/baseline harness (in-memory only, no file I/O)
 └── docs/
@@ -663,12 +669,12 @@ dnd-ping/
 ### 20.4 Testing expectations
 
 - Unit-test the engine: graph traversal, enforcement of the configured consecutive-dynamic-node limit, barrier behaviour (including that dead players do not participate in the confirmation barrier), death handling (dead harnesses are no longer called), ending-node termination.
-- Test information boundaries: assert participant observations contain **only** permitted fields, and never state which class has a vendetta against which boss.
+- Test information boundaries: assert participant observations contain **only** permitted fields, never state which class's nemesis each boss is, and never reveal another class's nemesis description or required action.
 - Test action validation: malformed, out-of-range, and adversarial inputs.
 - Include **prompt-injection test cases** (e.g. NPC dialogue or player text attempting to override instructions or extract hidden objectives).
 - Test against a resource-constrained configuration: the configured CPU/RAM caps within the assumed hardware (8 GB RAM, 6 cores, no GPU assumption). Test breach behaviour once decided, and test that any attempt to write to the filesystem fails.
 - Test the boss draw: each boss appears exactly once per run, in a random order, and the draw is reproducible from its seed.
-- Test the turn loop: one action per player per node; the broadcast barrier (missed windows, `[None]`, empty messages rejected, routing to `[all]` vs one class); the boss action is applied only when the boss is not defeated; stats carry over between nodes.
+- Test the turn loop: one action per player per node; the broadcast barrier (missed windows, `[None]`, empty messages rejected, routing to `[all]` vs one class); the boss action is applied only when the boss is not defeated; stats carry over between nodes; an invalid or late action applies the health penalty; the lower vendetta threshold applies only to a player's required action against their own nemesis, and a successful vendetta announces the stat buff to everyone.
 - Test that the per-run game state is kept separate from the static story graph, so one run cannot affect another.
 - Ensure the test story exercises the **same observation/action path** as the real game.
 
@@ -678,6 +684,7 @@ dnd-ping/
 - Do not treat Docker alone as a complete security boundary. Use least privilege, non-root execution, dropped capabilities, resource limits, a read-only root filesystem and no writable volume mounts (no persistent storage is provided to harnesses), and a stronger sandbox/VM boundary if the threat model requires it.
 - Do not mount the Docker socket, host home directories, organiser secrets, the real story graph, or unrelated host paths into participant containers.
 - Build and preload images/model assets before gameplay; runtime network access must not be needed.
+- On the GCP host, block harness network egress at the cloud level as well (for example firewall rules and no external IP), not only inside Docker.
 - Keep authoritative stats, dice, transition checks, and game state on the organiser side.
 - Never rely on a prompt instruction to protect information that can simply be withheld from the participant observation.
 - Log enough to audit actions, validation failures, timeouts, game transitions, and the random seeds and results of the participant and boss draws, without leaking hidden information to participants.
@@ -693,7 +700,7 @@ dnd-ping/
 
 - Do not add features that give the GM or engine's hidden information to harnesses.
 - Do not weaken sandboxing or the network restrictions to "make tests pass".
-- Do not hard-code the real story, class stats, boss data, vendetta assignments, hint keywords, or scoring before the organisers finalise them.
+- Do not hard-code the real story, class stats, boss data, nemesis descriptions, required vendetta actions, or scoring before the organisers finalise them.
 - Do not assume a specific model, quantisation, or context size.
 - Do not invent details of the final action schema or class-specific positive interactions that organisers have not defined.
 - Do not write harness, example, or test-story code that depends on file I/O or persistent storage.
@@ -717,28 +724,28 @@ Do not leave contradictory old rules elsewhere in the file. If a decision change
 
 ## 22. Glossary
 
-| Term                               | Meaning                                                                                                                                                                                                                               |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Harness**                        | The participant's Python class plus all logic around the 1B model: memory, context handling, decision logic.                                                                                                                          |
-| **GM (Game Master)**               | The unconstrained organiser-hosted model that interprets actions and picks transitions.                                                                                                                                               |
-| **Skeletal graph**                 | The predefined directed graph of the real story. Hidden from participants.                                                                                                                                                            |
-| **Node**                           | One game state, played for exactly one round. Holds only the story; stats, history and the drawn boss live in the game state.                                                                                                         |
-| **Dynamic / intermediate node**    | A GM-generated node between skeletal nodes; max 2 in a row (proposed).                                                                                                                                                                |
-| **Defined interactions**           | Obvious interactions the GM fills in for each node once its boss is drawn; hidden; not a restriction on player actions.                                                                                                               |
-| **Observation**                    | What a harness receives: the current event (with the boss's name) and own stats each round, plus initial-state info in round 1, broadcasts addressed to it, and the resolution outcome after each round.                              |
-| **Action**                         | The structured JSON a harness returns each turn. It targets either the current event or a specific player/class. Schema is OPEN.                                                                                                      |
-| **Game state**                     | The engine's authoritative per-run record: player stats, history, and the boss draw. Kept separate from the static story graph.                                                                                                       |
-| **Boss**                           | One of a set of 5 bosses. Each is encountered once per run, in a random order; the GM connects the drawn boss to the current story node. Its name is shown to players; if it is not defeated, the GM decides its action.              |
-| **Vendetta**                       | A class's personal grudge against one particular boss. Defeating that boss earns the class a bigger bonus than other classes get. Classes are not told which boss it is; they must infer it from keyword hints in the boss encounter. |
-| **Broadcast**                      | An optional message sent by a harness to the GM during the broadcast window, addressed to none, all, or a specific class.                                                                                                             |
-| **Player-directed interaction**    | A positive-only action targeting another player; successful effects apply as buffs before event-directed actions are resolved.                                                                                                        |
-| **Synchronisation barrier**        | A point where the game waits for harnesses, up to a set time limit. There are three per round: broadcasts, then actions (before dice rolls), then confirmations of receipt of the resolution outcome (shorter limit than actions).    |
-| **Run / playthrough**              | One independent game with 5 players drawn at random, one per class, facing all 5 bosses in a random order.                                                                                                                            |
-| **Ending node**                    | A terminal node in the graph; once the run reaches any and the round there completes, the run ends.                                                                                                                                   |
-| **Resource cap**                   | The enforced maximum CPU and RAM available to a harness. Values are OPEN. Harnesses have no persistent storage, so all memory is in-process RAM.                                                                                      |
-| **GHCR**                           | GitHub Container Registry, used to distribute the Docker image.                                                                                                                                                                       |
-| **Grammar-constrained generation** | Decoding restricted to a predefined grammar so output is always valid structured JSON.                                                                                                                                                |
-| **Prompt injection**               | Text that tries to override a model's instructions; must be treated as untrusted content.                                                                                                                                             |
+| Term                               | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Harness**                        | The participant's Python class plus all logic around the 1B model: memory, context handling, decision logic.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **GM (Game Master)**               | The unconstrained organiser-hosted model that interprets actions and picks transitions.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Skeletal graph**                 | The predefined directed graph of the real story. Hidden from participants.                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **Node**                           | One game state, played for exactly one round. Holds only the story; stats, history and the drawn boss live in the game state.                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Dynamic / intermediate node**    | A GM-generated node between skeletal nodes; max 2 in a row (proposed).                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Defined interactions**           | Obvious interactions the GM fills in for each node once its boss is drawn; hidden; not a restriction on player actions.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Observation**                    | What a harness receives: the current event (with the boss's name and description) and own stats each round, plus initial-state info in round 1, broadcasts addressed to it, and the resolution outcome after each round.                                                                                                                                                                                                                                                                                                             |
+| **Action**                         | The structured JSON a harness returns each turn. It targets either the current event or a specific player/class. Schema is OPEN.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Game state**                     | The engine's authoritative per-run record: player stats, history, and the boss draw. Kept separate from the static story graph.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Boss**                           | One of a set of 5 bosses. Each is encountered once per run, in a random order; the GM connects the drawn boss to the current story node. Its name and description are shown to players; if it is not defeated, the GM decides its action.                                                                                                                                                                                                                                                                                            |
+| **Vendetta**                       | A class's personal grudge against one particular boss, its nemesis; every class's nemesis is different. In the initial-state observation the class gets a description of its nemesis and a specific action to perform when it meets it. If the GM judges the action matches and its dice roll succeeds (against a lower threshold), the class gets a stat buff announced to everyone. Completing it is the first ranking tie-breaker. The nemesis is not named; the harness must recognise it from the boss encounter's description. |
+| **Broadcast**                      | An optional message sent by a harness to the GM during the broadcast window, addressed to none, all, or a specific class.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **Player-directed interaction**    | A positive-only action targeting another player; successful effects apply as buffs before event-directed actions are resolved.                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Synchronisation barrier**        | A point where the game waits for harnesses, up to a set time limit. There are three per round: broadcasts, then actions (before dice rolls), then confirmations of receipt of the resolution outcome (shorter limit than actions).                                                                                                                                                                                                                                                                                                   |
+| **Run / playthrough**              | One independent game with 5 players drawn at random, one per class, facing all 5 bosses in a random order. Each participant plays exactly one run.                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Ending node**                    | A terminal node in the graph; once the run reaches any and the round there completes, the run ends.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **Resource cap**                   | The enforced maximum CPU and RAM available to a harness. Values are OPEN. Harnesses have no persistent storage, so all memory is in-process RAM.                                                                                                                                                                                                                                                                                                                                                                                     |
+| **GHCR**                           | GitHub Container Registry, used to distribute the Docker image.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Grammar-constrained generation** | Decoding restricted to a predefined grammar so output is always valid structured JSON.                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **Prompt injection**               | Text that tries to override a model's instructions; must be treated as untrusted content.                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ---
 
