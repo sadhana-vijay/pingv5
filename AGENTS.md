@@ -318,6 +318,25 @@ This balances narrative flexibility with story adherence. The barrier and turn s
 
 [DECIDED] **Consequence of hidden objectives:** messages between players cannot be assumed truthful. Players act simultaneously; there is no back-and-forth within a single round.
 
+ 1. The Broken Chapel
+Event: The team enters an abandoned cathedral. A howling storm tries to separate them.
+The team enters an abandoned cathedral caught in a heavy hurricane of dark rose petals and toxic smog. The air reduces visibility and drains stamina.  Ahead, a jagged stone archway blocks the path forward, glowing with a faint, sorrowful purple light. A distorted projection of Emo Aphrodite’s voice echoes: 'Turn back, fools; every vow rots into ash.' Team must find a way to anchor themselves against the storm and unlock the archway before the wind tears them apart. 
+Francesca: Uses Charisma to recite calming poetry, stabilizing the winds around the team.
+Cerberus: Uses brute strength to physically shield squishier teammates (like Aristotle) from falling debris.
+Aristotle: Analyzes the magical runes on the archway using Wisdom to reveal the lock mechanism.
+Medusa: Uses stealth to bypass the storm's edge and into the stone archway.
+
+The Hall of Mismatched Altars (Divided Loyalties)
+The Shared Threat: Emo Aphrodite casts a wave of cynicism, while a cloud of toxic fumes (Digestive Illness theme) fills the lower floor. The team risks turning on each other or choking.  
+
+Team Survival Goal: Clear the air and reach the upper balcony together.
+Aristotle: Aristotle pulls out his parchment notes, reads the chemical compound out loud, and delivers a lecture so incredibly dry and boring that it literally puts the sentient gas particles to sleep. Synthesizes an emergency remedy using herbs scattered around the hall to neutralize the toxic air (protecting his own mind while keeping the team breathing). 
+Francesca: Uses her charm to counter the cynical spell, preventing the team from arguing.
+Cerberus: Smashes through the crumbling pews to create a clear physical ramp up to the balcony.
+Medusa: Uses her gaze to petrify falling rafters into stable stone bridges for the team to climb.
+
+
+
 ---
 
 ## 11. Action Format and Grammar-Constrained Generation
