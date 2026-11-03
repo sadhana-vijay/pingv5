@@ -205,15 +205,18 @@ This balances narrative flexibility with story adherence. The barrier and turn s
 **Per-round sequence:**
 
 1. At the start of the first round, each living participant receives the **initial-state observation**, containing the current event, their own stats and objective, and the other players' classes and stats. In subsequent rounds, living participants receive only the **current event** and **their own stats**.
-2. Each harness independently processes the observation and decides an action. This happens within the barrier's **set time limit**: the harness may do whatever internal processing it likes (non-LLM logic, one LLM call, several LLM calls) as long as it submits in time.
-3. Each harness submits its **structured JSON action**.
-4. **Barrier (action submission)**: the game waits for all submissions, up to the set time limit.
-5. **One dice roll per player's action** happens (see §9).
-6. Actions are **resolved**.
-7. The **resolution outcome is announced** to all active harnesses (see §5). Nothing is required of a living player's harness except to ingest it however it wishes and send back a confirmation of receipt. If a player dies during resolution, their death is announced as part of the resolution outcome and their harness does not participate in the confirmation barrier.
-8. **Barrier (confirmation)**: the game waits for confirmations from all surviving players, with a **shorter time limit** than the action-submission barrier.
-9. The **GM selects the next game state** using the graph.
-10. Next round begins.
+2. **Broadcast window:** each harness may submit at most one optional broadcast message to the GM, addressed to `[None]`, `[all]`, or a specific `[class]`. `[None]` means no message; a submitted message cannot be empty. The broadcast window has a set time limit.
+3. **Barrier (broadcast submission):** the game waits for broadcast submissions up to the set time limit. A harness that does not submit within the window loses its opportunity to broadcast that round; it receives no extension or additional time.
+4. The GM announces each submitted message to its intended recipient or recipients, identifying the sender by class. `[all]` messages are announced to all harnesses; a class-addressed message is announced to the harness for that class. Harnesses receive the announcements before deciding their actions.
+5. Each harness processes the observation and any broadcasts it received, then decides an action. This happens within the action-submission barrier's **set time limit**: the harness may do whatever internal processing it likes (non-LLM logic, one LLM call, several LLM calls) as long as it submits in time.
+6. Each harness submits its **structured JSON action**.
+7. **Barrier (action submission):** the game waits for all submissions, up to the set time limit.
+8. Player-directed interactions are resolved first: each receives its dice roll, and successful positive effects are applied as buffs to the affected player's stats (see §9–10).
+9. Event-directed actions then receive their dice rolls and are resolved using the stats after those buffs have been applied (see §9).
+10. The GM narrates the collective resolution, communicating the successes, failures, and effects through the story. The **resolution outcome is announced** to all active harnesses (see §5). Nothing is required of a living player's harness except to ingest it however it wishes and send back a confirmation of receipt. If a player dies during resolution, their death is announced as part of the resolution outcome and their harness does not participate in the confirmation barrier.
+11. **Barrier (confirmation):** the game waits for confirmations from all surviving players, with a **shorter time limit** than the action-submission barrier.
+12. The **GM selects the next game state** using the graph.
+13. Next round begins.
 
 [DECIDED] **All players travel together.** There is one shared sequence of game states. Players cannot branch off into separate nodes.
 
@@ -257,13 +260,13 @@ Intended priority order:
 
 ## 9. Dice and Action Resolution
 
-[DECIDED] Each player's action receives exactly one dice roll.
+[DECIDED] Each player's submitted action receives exactly one dice roll. A broadcast message does not receive a dice roll, and a player receiving an interaction does not submit a response or receive an additional roll.
 
-[OPEN] The actual dice system and mechanics (e.g. d20 + modifier), how stats map to rolls, whether those rules are disclosed to participants, and how simultaneous conflicting actions between players are ordered or resolved must be finalised.
+[DECIDED] Player-directed interactions are resolved before event-directed actions. Each player-directed interaction receives its action's one dice roll first; successful positive effects are applied as buffs to the affected player's stats. Event-directed actions then receive their dice rolls and are resolved using the stats after those buffs have been applied. The GM narrates the collective resolution at the end, communicating successes, failures, and effects through the story.
 
-**Worked example:** three players act in the same round. Two choose _attack_, one chooses _hide_. **Each player receives one roll for their action** to determine whether it is possible and how well it succeeds. Both attackers can succeed (or fail) independently.
+[OPEN] The actual dice system and mechanics (e.g. d20 + modifier), how stats map to rolls, and whether those rules are disclosed to participants must be finalised.
 
-[DECIDED] Players can **affect each other**: attacks, and other hostile or cooperative effects, can target other players.
+**Worked example:** three players act in the same round. Two choose _attack_, one chooses _hide_. **Each player receives one roll for their action** to determine whether it is possible and how well it succeeds. Both attackers can succeed (or fail) independently. If another player successfully applies a defensive buff to one of them, that buff is applied before the event-directed action is resolved.
 
 ---
 
@@ -271,17 +274,19 @@ Intended priority order:
 
 [DECIDED] GM-mediated coordination between players is permitted. Interaction does **not** happen privately player-to-player; it goes **through the GM**, so that players' 1B models do not have to deal with prompt injection from other players directly.
 
-[DECIDED] **Constraint inherited from the rules:** since a harness only receives _current event + own stats_ each turn (plus the resolution outcome and initial-state info), any communication mechanism has to be delivered through what the harness receives. Players act **simultaneously** behind the barrier, so there is no back-and-forth within a single round.
+[DECIDED] In each round, after the current event is announced and before actions are submitted, each harness has a broadcast window in which it may send **at most one** optional message to the GM. The recipient must be exactly one of `[None]`, `[all]`, or a specific `[class]`. `[None]` means no message; a submitted message cannot be empty. After the broadcast-submission barrier, the GM announces `[all]` messages to all harnesses and class-addressed messages to the harness for that class. Each announcement identifies the sender by class. Harnesses receive broadcasts before deciding their actions. A harness that misses the broadcast window cannot send a message that round and receives no extension or additional time.
 
-[DECIDED] **Consequence of hidden objectives:** messages between players cannot be assumed truthful.
+[DECIDED] Each turn's action is directed either at the **current event** or at a **specific player/class**, not both. Player-directed interactions are **positive only**. Organisers will define the positive interactions available for each class; examples include healing, lending mana, and defending another player. Attacks, sabotage, and other negative player-directed interactions are not allowed. The exact class-specific interaction options are to be defined.
 
-> [OPEN] The interface and timing of player interaction are undecided. Do not implement a mechanism. If code needs a hook, use a clearly marked placeholder (see §20).
+[DECIDED] Player-directed interactions do not require a response from the recipient. They are resolved before event-directed actions: successful interactions apply buffs to the affected player's stats, and event-directed actions are then resolved using the modified stats. See §9.
+
+[DECIDED] **Consequence of hidden objectives:** messages between players cannot be assumed truthful. Players act simultaneously; there is no back-and-forth within a single round.
 
 ---
 
 ## 11. Action Format and Grammar-Constrained Generation
 
-[DECIDED] Each turn, a player submits **only an action** to the GM, as **structured JSON**. They submit nothing else; all memory and reasoning stays inside the harness.
+[DECIDED] Each turn, a player submits an optional broadcast during the broadcast window (see §10), followed by **only an action** to the GM as **structured JSON**. They submit nothing else; all memory and reasoning stays inside the harness.
 
 [DECIDED] **Organisers define the grammar.** Participants' models use **grammar-constrained generation** so output is always syntactically valid JSON in the required structure. This avoids malformed JSON and stray natural-language text.
 
@@ -296,7 +301,7 @@ Illustration of the _kind_ of output (**not the final schema**):
 }
 ```
 
-> [OPEN] **OPEN: the full action schema is not decided.** The exact field names, which fields are enumerated vs free text, field length limits, and whether any additional fields exist (for example for coordination) are all undecided. **Do not hard-code a schema.** Isolate schema handling in one module so it can change (see §20).
+> [OPEN] **OPEN: the full action schema is not decided.** The exact field names, which fields are enumerated vs free text, field length limits, and how the mutually exclusive event/player target and class-specific positive interactions are represented are undecided. **Do not hard-code a schema.** Isolate schema handling in one module so it can change (see §20).
 
 [DECIDED] **Syntactically valid ≠ valid in-game.** The game engine must still validate every submitted action.
 
@@ -434,15 +439,17 @@ Harness execution environments must have **no internet access**, to prevent:
 3. Classes are assigned.
 4. Each participant receives the initial-state observation (current event, own stats and objective, and other players' classes and stats).
 5. The game begins.
-6. In each subsequent round, each living participant receives the current event and their own stats, manages memory, and returns an action within the time limit.
-7. The action-submission barrier waits for all living players' actions.
-8. Each player's action receives one dice roll; actions are resolved.
-9. The resolution outcome is announced to all active harnesses. Players who die during resolution are announced as dead, their harnesses are discarded, and they do not participate in the confirmation barrier.
-10. The confirmation barrier waits for confirmations from surviving players (shorter time limit).
-11. The GM chooses the next state from the graph (up to 2 consecutive dynamic nodes).
-12. All surviving players continue together.
-13. The run ends when the round at an ending node completes.
-14. Ranking: survival first, then objective completion, then further tie-breakers.
+6. In each round, each living participant receives the current event and their own stats.
+7. Each harness may submit at most one optional broadcast to the GM during the broadcast window, addressed to `[None]`, `[all]`, or a specific `[class]`.
+8. The broadcast-submission barrier waits for submissions. The GM announces messages to their intended recipients, identifying each sender by class. A harness that misses the window loses its opportunity to broadcast that round.
+9. After receiving broadcasts, each harness decides and submits an action within the action-submission time limit. The action is directed either at the current event or at a specific player/class, not both.
+10. Player-directed positive interactions receive their dice rolls first and successful effects are applied as buffs to affected players' stats. Event-directed actions then receive their dice rolls and are resolved using the modified stats.
+11. The GM narrates the collective resolution. The resolution outcome is announced to all active harnesses. Players who die during resolution are announced as dead, their harnesses are discarded, and they do not participate in the confirmation barrier.
+12. The confirmation barrier waits for confirmations from surviving players (shorter time limit).
+13. The GM chooses the next state from the graph (up to 2 consecutive dynamic nodes).
+14. All surviving players continue together.
+15. The run ends when the round at an ending node completes.
+16. Ranking: survival first, then objective completion, then further tie-breakers.
 
 ---
 
@@ -496,39 +503,38 @@ Anything here is **undecided**. Do not assume answers.
 
 ### Highest priority (explicitly deferred by organisers)
 
-1. **How players interact / coordinate.** GM-mediated coordination is permitted; its interface and timing are open. (§10)
-2. **The action schema.** Field names, which are free text vs enumerated, length limits, extra fields. (§11)
+1. **The action schema.** Field names, which are free text vs enumerated, length limits, and representation of event/player targets and class-specific positive interactions. (§11)
 
 ### Harness interface
 
-3. Exact Python class interface, including method names, signatures, and lifecycle hooks (init, initial-state hook, per-turn method, etc.).
+2. Exact Python class interface, including method names, signatures, and lifecycle hooks (init, initial-state hook, per-turn method, etc.).
 
 ### Model and compute
 
-4. Which 1B model, which quantisation.
-5. Context window size.
-6. Token budget per turn.
-7. Durations of the action-submission and confirmation time limits, and the total game time limit.
-8. CPU and RAM cap values, whether the 1B model's footprint counts toward them, and behaviour on breach. (§12)
-9. Maximum submission size and bundled assets. With no runtime storage, can participants ship precomputed data (embedding models, vector indexes, lookup tables) inside the submission? This affects whether "embeddings" is realistically usable. (§12)
-10. Whether any ephemeral scratch/tmp area exists. (§12)
+3. Which 1B model, which quantisation.
+4. Context window size.
+5. Token budget per turn.
+6. Durations of the action-submission and confirmation time limits, and the total game time limit.
+7. CPU and RAM cap values, whether the 1B model's footprint counts toward them, and behaviour on breach. (§12)
+8. Maximum submission size and bundled assets. With no runtime storage, can participants ship precomputed data (embedding models, vector indexes, lookup tables) inside the submission? This affects whether "embeddings" is realistically usable. (§12)
+9. Whether any ephemeral scratch/tmp area exists. (§12)
 
 ### Game mechanics
 
-11. Dice system and whether stat-to-roll rules are disclosed.
-12. How conflicting simultaneous actions between players are resolved and ordered.
-13. Exact contents, format, and scope of the resolution outcome surfaced to harnesses.
-14. Handling of invalid or timed-out actions.
-15. Exact maximum for consecutive dynamic nodes (2 is the proposal).
+10. Dice system and whether stat-to-roll rules are disclosed.
+11. How conflicting simultaneous actions between players are resolved and ordered.
+12. Exact contents, format, and scope of the resolution outcome surfaced to harnesses.
+13. Handling of invalid or timed-out actions.
+14. Exact maximum for consecutive dynamic nodes (2 is the proposal).
 
 ### Scoring
 
-16. Further tie-breakers beyond survival and objective completion, and whether a points allocation is used.
-17. Cross-run score aggregation and fairness across different class mixes.
+15. Further tie-breakers beyond survival and objective completion, and whether a points allocation is used.
+16. Cross-run score aggregation and fairness across different class mixes.
 
 ### Build phase
 
-18. Whether the test game's observation and action formats match the real game exactly (strongly recommended).
+17. Whether the test game's observation and action formats match the real game exactly (strongly recommended).
 
 ---
 
@@ -559,7 +565,7 @@ Before coding:
 ### 20.2 Handling open questions in code
 
 - Put **all action-schema code** (types, JSON grammar, parsing, validation) in **one isolated module**, so it can change without touching the rest of the code.
-- Put **all player interaction hooks** (GM-mediated) behind a **single interface** with a no-op default.
+- Keep **broadcast handling** and **player-directed interaction resolution** behind clearly defined interfaces, separate from the harness's internal decision logic.
 - Mark placeholders clearly, for example:
   ```python
   # OPEN-QUESTION(action-schema): final fields undecided; see AGENTS.md §11, §19.
@@ -624,7 +630,7 @@ dnd-ping/
 - Do not weaken sandboxing or the network restrictions to "make tests pass".
 - Do not hard-code the real story, class stats, or scoring before the organisers finalise them.
 - Do not assume a specific model, quantisation, or context size.
-- Do not invent a coordination mechanism or final action schema.
+- Do not invent details of the final action schema or class-specific positive interactions that organisers have not defined.
 - Do not write harness, example, or test-story code that depends on file I/O or persistent storage.
 - Do not hard-code CPU/RAM cap values.
 
@@ -655,7 +661,9 @@ Do not leave contradictory old rules elsewhere in the file. If a decision change
 | **Dynamic / intermediate node**    | A GM-generated node between skeletal nodes; max 2 in a row (proposed).                                                                                                                       |
 | **Defined interactions**           | Predefined obvious interactions in a node; hidden; not a restriction on player actions.                                                                                                      |
 | **Observation**                    | What a harness receives per turn: current event + own stats, plus the resolution outcome after each round (and initial-state info at the start).                                             |
-| **Action**                         | The structured JSON a harness returns each turn. Schema is OPEN.                                                                                                                             |
+| **Action**                         | The structured JSON a harness returns each turn. It targets either the current event or a specific player/class. Schema is OPEN.                                                            |
+| **Broadcast**                      | An optional message sent by a harness to the GM during the broadcast window, addressed to none, all, or a specific class.                                                                    |
+| **Player-directed interaction**    | A positive-only action targeting another player; successful effects apply as buffs before event-directed actions are resolved.                                                              |
 | **Synchronisation barrier**        | A point where the game waits for all harnesses: first for all actions, before dice rolls (set time limit); then for confirmations of receipt of the resolution outcome (shorter time limit). |
 | **Run / playthrough**              | One independent game with a group of players (~5, one per class).                                                                                                                            |
 | **Ending node**                    | A terminal node in the graph; once the run reaches any and the round there completes, the run ends.                                                                                          |
