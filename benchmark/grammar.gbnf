@@ -1,0 +1,6 @@
+root ::= "{" ws "\"action\"" ws ":" ws string "," ws "\"target\"" ws ":" ws string ws "}"
+string ::= "\"" characters "\""
+characters ::= character+
+character ::= [^"\\] | "\\" escape
+escape ::= ["\\nrt]
+ws ::= [ \t\n]*
